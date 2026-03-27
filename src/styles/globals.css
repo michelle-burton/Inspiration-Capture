@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base ─────────────────────────────────────────────── */
+@layer base {
+  html {
+    font-family: 'Manrope', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-surface text-on-surface min-h-screen;
+    background-image: radial-gradient(circle at 0% 0%, rgba(129,236,255,0.05) 0%, transparent 50%),
+                      radial-gradient(circle at 100% 100%, rgba(166,140,255,0.05) 0%, transparent 50%);
+  }
+
+  /* Material Symbols config */
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+  .material-symbols-filled {
+    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+}
+
+/* ── Utilities ────────────────────────────────────────── */
+@layer utilities {
+  /* Glassmorphism — floating elements */
+  .glass {
+    @apply bg-surface-variant/60 backdrop-blur-xl;
+  }
+
+  /* Headline font shorthand */
+  .font-display {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+  }
+
+  /* Neon ambient glow backgrounds */
+  .bg-neon-curtain {
+    background-image: radial-gradient(circle at 0% 0%, rgba(129,236,255,0.05) 0%, transparent 50%),
+                      radial-gradient(circle at 100% 100%, rgba(166,140,255,0.05) 0%, transparent 50%);
+  }
+
+  /* Ghost border fallback (15% opacity) */
+  .ghost-border {
+    outline: 1px solid rgba(71, 72, 76, 0.15);
+  }
+}
