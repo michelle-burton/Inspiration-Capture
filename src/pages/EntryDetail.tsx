@@ -31,11 +31,8 @@ export default function EntryDetail() {
   }
 
   function handleDelete() {
-    if (!confirmDelete) {
-      setConfirmDelete(true)
-      return
-    }
-    removeEntry(entry!.id)
+    if (!entry) return
+    removeEntry(entry.id)
     navigate('/gallery', { replace: true })
   }
 
@@ -49,13 +46,13 @@ export default function EntryDetail() {
         >
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
+        {/* Delete trigger — first tap reveals the confirmation strip at the bottom */}
         <button
-          onClick={handleDelete}
-          className={`text-sm font-bold transition-colors ${
-            confirmDelete ? 'text-tertiary' : 'text-on-surface-variant'
-          }`}
+          onClick={() => setConfirmDelete(true)}
+          className="text-on-surface-variant/60 active:scale-95 transition-all hover:text-tertiary"
+          aria-label="Delete entry"
         >
-          {confirmDelete ? 'Confirm delete?' : 'Delete'}
+          <span className="material-symbols-outlined text-[1.25rem]">delete</span>
         </button>
       </div>
 
@@ -164,16 +161,46 @@ export default function EntryDetail() {
       )}
 
       {/* ── Footer actions ───────────────────────────────── */}
-      <div className="flex gap-3 pt-2">
-        <GlowButton variant="secondary" onClick={() => navigate('/gallery')} className="flex-1">
-          <span className="material-symbols-outlined text-base">arrow_back</span>
-          Gallery
-        </GlowButton>
-        <GlowButton variant="primary" onClick={() => navigate('/capture')} className="flex-1">
-          <span className="material-symbols-outlined text-base">add_a_photo</span>
-          New Capture
-        </GlowButton>
-      </div>
+      {confirmDelete ? (
+        /* ── Confirmation strip — replaces footer when delete is tapped ── */
+        <div className="rounded-2xl bg-surface-container ring-1 ring-tertiary/30 p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-tertiary/10 flex items-center justify-center flex-shrink-0">
+              <span className="material-symbols-outlined text-tertiary text-lg">delete_forever</span>
+            </div>
+            <div>
+              <p className="font-headline font-bold text-sm text-on-surface">Delete this entry?</p>
+              <p className="text-xs text-on-surface-variant mt-0.5">This cannot be undone.</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="flex-1 rounded-xl py-3 bg-surface-container-high text-sm font-bold text-on-surface-variant active:scale-95 transition-all hover:bg-surface-container-highest"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDelete}
+              className="flex-1 rounded-xl py-3 bg-tertiary/10 ring-1 ring-tertiary/40 text-sm font-bold text-tertiary active:scale-95 transition-all hover:bg-tertiary/20"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* ── Normal footer ────────────────────────────────────────────── */
+        <div className="flex gap-3 pt-2">
+          <GlowButton variant="secondary" onClick={() => navigate('/gallery')} className="flex-1">
+            <span className="material-symbols-outlined text-base">arrow_back</span>
+            Gallery
+          </GlowButton>
+          <GlowButton variant="primary" onClick={() => navigate('/capture')} className="flex-1">
+            <span className="material-symbols-outlined text-base">add_a_photo</span>
+            New Capture
+          </GlowButton>
+        </div>
+      )}
     </div>
   )
 }
