@@ -11,7 +11,9 @@ import type { NewCaptureEntry, Tag } from '../types'
 export default function NewEntry() {
   const navigate = useNavigate()
   const { addEntry } = useEntries()
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  // Two separate refs — iOS Safari breaks when capture + multiple are combined
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const libraryInputRef = useRef<HTMLInputElement>(null)
   const mediaRef = useRef<MediaRecorder | null>(null)
   const audioChunks = useRef<Blob[]>([])
 
@@ -24,6 +26,8 @@ export default function NewEntry() {
   const [tags, setTags] = useState<Tag[]>([])
 
   // ── Photo handling ──────────────────────────────────────
+  // Shared handler — both inputs (camera + library) call this.
+  // We reset e.target.value so the same photo can be re-selected if needed.
   function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
     files.forEach((file) => {
@@ -34,6 +38,8 @@ export default function NewEntry() {
       }
       reader.readAsDataURL(file)
     })
+    // Reset so the same file can be picked again later
+    e.target.value = ''
   }
 
   function removePhoto(idx: number) {
@@ -110,34 +116,69 @@ export default function NewEntry() {
         <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
           Photos
         </p>
-        <div className="grid grid-cols-3 gap-2">
-          {/* Add photo button */}
+
+        {/* Two separate trigger buttons — critical for iPhone Safari reliability */}
+        <div className="grid grid-cols-2 gap-2">
+          {/* Button 1: opens native camera directly */}
           <button
-            onClick={() => fileInputRef.current?.click()}
-            className="aspect-square rounded-xl bg-surface-container flex flex-col items-center justify-center gap-1 text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all active:scale-95"
+            onClick={() => cameraInputRef.current?.click()}
+            className="rounded-xl bg-surface-container py-4 flex flex-col items-center justify-center gap-2 text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all active:scale-95"
           >
-            <span className="material-symbols-outlined text-2xl">add_photo_alternate</span>
-            <span className="text-[9px] font-bold uppercase tracking-widest">Add</span>
+            <span className="material-symbols-outlined text-2xl">photo_camera</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest">Take Photo</span>
           </button>
-          {/* Photo thumbnails */}
-          {photos.map((src, idx) => (
-            <div key={idx} className="aspect-square rounded-xl overflow-hidden relative group">
-              <img src={src} alt={`photo ${idx + 1}`} className="w-full h-full object-cover" />
-              <button
-                onClick={() => removePhoto(idx)}
-                className="absolute top-1 right-1 w-5 h-5 rounded-full bg-surface-container-lowest/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <span className="material-symbols-outlined text-[0.7rem] text-on-surface">close</span>
-              </button>
-            </div>
-          ))}
+
+          {/* Button 2: opens photo library picker (multi-select allowed) */}
+          <button
+            onClick={() => libraryInputRef.current?.click()}
+            className="rounded-xl bg-surface-container py-4 flex flex-col items-center justify-center gap-2 text-on-surface-variant hover:text-secondary hover:bg-surface-container-high transition-all active:scale-95"
+          >
+            <span className="material-symbols-outlined text-2xl">photo_library</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest">From Library</span>
+          </button>
         </div>
+
+        {/* Photo thumbnails — shared output for both inputs */}
+        {photos.length > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            {photos.map((src, idx) => (
+              <div key={idx} className="aspect-square rounded-xl overflow-hidden relative group">
+                <img src={src} alt={`photo ${idx + 1}`} className="w-full h-full object-cover" />
+                <button
+                  onClick={() => removePhoto(idx)}
+                  className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center"
+                >
+                  <span className="material-symbols-outlined text-sm text-white">close</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/*
+          INPUT 1 — camera capture only.
+          capture="environment" → rear camera on mobile.
+          NO multiple — iOS Safari does not support multiple + capture together.
+        */}
         <input
-          ref={fileInputRef}
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handlePhotoSelect}
+          className="hidden"
+        />
+
+        {/*
+          INPUT 2 — photo library picker.
+          multiple is fine here because capture is absent.
+          NO capture attribute — lets iOS show the full library sheet.
+        */}
+        <input
+          ref={libraryInputRef}
           type="file"
           accept="image/*"
           multiple
-          capture="environment"
           onChange={handlePhotoSelect}
           className="hidden"
         />
