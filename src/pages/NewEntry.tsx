@@ -6,88 +6,190 @@ import { GlowButton } from '../components/ui/GlowButton'
 import { defaultTitle } from '../utils/format'
 import type { NewCaptureEntry, Tag } from '../types'
 
-// New Entry page — the main capture form.
-// Handles photo upload (base64), voice recording, tags, and observations.
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Compress a base64 image via Canvas.
+ * iPhone photos at full res are 4–10 MB → exceed the 5 MB localStorage quota.
+ * Resizing to ≤1200 px wide at JPEG 0.75 brings them to ~150–300 KB.
+ */
+function compressImage(dataUrl: string, maxWidth = 1200, quality = 0.75): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const scale = Math.min(1, maxWidth / img.width)
+      const canvas = document.createElement('canvas')
+      canvas.width  = Math.round(img.width  * scale)
+      canvas.height = Math.round(img.height * scale)
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      resolve(canvas.toDataURL('image/jpeg', quality))
+    }
+    img.onerror = () => resolve(dataUrl) // fallback: keep original
+    img.src = dataUrl
+  })
+}
+
+/**
+ * Pick the first MIME type the current browser's MediaRecorder actually supports.
+ * iOS (Safari + Chrome) only supports audio/mp4 — audio/webm is a desktop-only format.
+ */
+function getSupportedAudioMime(): string {
+  const candidates = [
+    'audio/mp4',
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+  ]
+  return candidates.find((t) => MediaRecorder.isTypeSupported(t)) ?? ''
+}
+
+/** Convert any Blob to a persistent base64 data URL via FileReader. */
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload  = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function NewEntry() {
   const navigate = useNavigate()
   const { addEntry } = useEntries()
-  // Two separate refs — iOS Safari breaks when capture + multiple are combined
-  const cameraInputRef = useRef<HTMLInputElement>(null)
+
+  // Two separate refs — iOS Safari/Chrome breaks when capture + multiple are on one input
+  const cameraInputRef  = useRef<HTMLInputElement>(null)
   const libraryInputRef = useRef<HTMLInputElement>(null)
-  const mediaRef = useRef<MediaRecorder | null>(null)
-  const audioChunks = useRef<Blob[]>([])
+  const mediaRef        = useRef<MediaRecorder | null>(null)
+  const audioChunks     = useRef<Blob[]>([])
 
-  const [title, setTitle] = useState(defaultTitle())
-  const [photos, setPhotos] = useState<string[]>([])
-  const [audioUrl, setAudioUrl] = useState<string>()
-  const [isRecording, setIsRecording] = useState(false)
-  const [transcript, setTranscript] = useState('')
+  const [title,        setTitle]        = useState(defaultTitle())
+  const [photos,       setPhotos]       = useState<string[]>([])
+  const [audioUrl,     setAudioUrl]     = useState<string>()
+  const [isRecording,  setIsRecording]  = useState(false)
+  const [isSaving,     setIsSaving]     = useState(false)
+  const [transcript,   setTranscript]   = useState('')
   const [observations, setObservations] = useState('')
-  const [tags, setTags] = useState<Tag[]>([])
+  const [tags,         setTags]         = useState<Tag[]>([])
 
-  // ── Photo handling ──────────────────────────────────────
-  // Shared handler — both inputs (camera + library) call this.
-  // We reset e.target.value so the same photo can be re-selected if needed.
+  // ── Photo handling ──────────────────────────────────────────────────────────
+  // Root cause of "photo not saved": iPhone photos are 4–10 MB. As base64 they
+  // exceed iOS localStorage's 5 MB quota → silent QuotaExceededError → entry
+  // never written. Fix: compress to ≤1200 px / JPEG 0.75 before storing.
   function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
+    e.target.value = '' // reset input so same photo can be re-selected
+
     files.forEach((file) => {
       const reader = new FileReader()
-      reader.onload = (ev) => {
-        const result = ev.target?.result as string
-        setPhotos((prev) => [...prev, result])
+      reader.onload = async (ev) => {
+        const raw        = ev.target?.result as string
+        const compressed = await compressImage(raw)
+        console.log('[photo] compressed to', Math.round(compressed.length / 1024), 'KB')
+        setPhotos((prev) => [...prev, compressed])
       }
       reader.readAsDataURL(file)
     })
-    // Reset so the same file can be picked again later
-    e.target.value = ''
   }
 
   function removePhoto(idx: number) {
     setPhotos((prev) => prev.filter((_, i) => i !== idx))
   }
 
-  // ── Voice recording ─────────────────────────────────────
+  // ── Voice recording ─────────────────────────────────────────────────────────
+  // Root cause of "recording error": two problems stacked:
+  //   1. `new Blob(chunks, { type: 'audio/webm' })` — iOS only supports audio/mp4.
+  //      Mislabelling the blob makes the <audio> element refuse to play it.
+  //   2. URL.createObjectURL() produces an ephemeral blob: URL that dies after
+  //      navigation. Even if localStorage wrote it, it's an unresolvable pointer
+  //      on any reload. Must convert to base64 before saving.
   async function toggleRecording() {
     if (isRecording) {
       mediaRef.current?.stop()
       setIsRecording(false)
       return
     }
+
+    if (!window.MediaRecorder) {
+      alert('Voice recording is not supported on this browser.')
+      return
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
+      const stream   = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = getSupportedAudioMime()
+      console.log('[audio] using mimeType:', mimeType || '(browser default)')
+
+      const recorderOpts = mimeType ? { mimeType } : {}
+      const recorder     = new MediaRecorder(stream, recorderOpts)
       audioChunks.current = []
-      recorder.ondataavailable = (e) => audioChunks.current.push(e.data)
-      recorder.onstop = () => {
-        const blob = new Blob(audioChunks.current, { type: 'audio/webm' })
-        const url = URL.createObjectURL(blob)
-        setAudioUrl(url)
-        stream.getTracks().forEach((t) => t.stop())
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunks.current.push(e.data)
       }
-      recorder.start()
+
+      recorder.onerror = (e) => {
+        console.error('[audio] MediaRecorder error:', e)
+        setIsRecording(false)
+        stream.getTracks().forEach((t) => t.stop())
+        alert('Recording failed. Please try again.')
+      }
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        const effectiveMime = mimeType || recorder.mimeType || 'audio/mp4'
+        const blob = new Blob(audioChunks.current, { type: effectiveMime })
+        console.log('[audio] blob size:', blob.size, 'bytes, type:', blob.type)
+        try {
+          const base64 = await blobToBase64(blob)
+          console.log('[audio] base64 length:', base64.length)
+          setAudioUrl(base64)
+        } catch (err) {
+          console.error('[audio] base64 conversion failed:', err)
+          alert('Audio could not be processed. Please try again.')
+        }
+      }
+
+      // timeslice=250ms: collect chunks periodically — safer on iOS than waiting for stop
+      recorder.start(250)
       mediaRef.current = recorder
       setIsRecording(true)
-    } catch {
+    } catch (err) {
+      console.error('[audio] getUserMedia failed:', err)
       alert('Microphone access denied.')
     }
   }
 
-  // ── Save ────────────────────────────────────────────────
-  function handleSave() {
+  // ── Save ────────────────────────────────────────────────────────────────────
+  async function handleSave() {
+    setIsSaving(true)
     const source: NewCaptureEntry['source'] =
-      photos.length > 0 && audioUrl
-        ? 'mixed'
-        : photos.length > 0
-        ? 'photo'
-        : audioUrl
-        ? 'voice'
-        : 'text'
+      photos.length > 0 && audioUrl ? 'mixed'
+      : photos.length > 0           ? 'photo'
+      : audioUrl                    ? 'voice'
+      :                               'text'
 
-    addEntry({ title, photos, audioUrl, transcript, observations, tags, source })
-    navigate('/', { replace: true })
+    try {
+      console.log('[save] photos:', photos.length, '| audioUrl:', !!audioUrl, '| source:', source)
+      addEntry({ title, photos, audioUrl, transcript, observations, tags, source })
+      console.log('[save] entry written to localStorage ✓')
+      navigate('/', { replace: true })
+    } catch (err) {
+      console.error('[save] localStorage write failed:', err)
+      setIsSaving(false)
+      alert(
+        photos.length > 0
+          ? 'Save failed — photos may be too large. Try fewer photos or use From Library.'
+          : 'Save failed. Please try again.'
+      )
+    }
   }
 
-  const canSave = title.trim().length > 0 && (photos.length > 0 || audioUrl || observations.trim())
+  const canSave = !isSaving && title.trim().length > 0 && (photos.length > 0 || audioUrl || observations.trim())
 
   return (
     <div className="space-y-6">
@@ -98,7 +200,7 @@ export default function NewEntry() {
         </button>
         <h2 className="font-headline font-bold text-base text-on-surface">New Entry</h2>
         <GlowButton variant="primary" onClick={handleSave} disabled={!canSave}>
-          Save
+          {isSaving ? 'Saving…' : 'Save'}
         </GlowButton>
       </div>
 
@@ -117,9 +219,8 @@ export default function NewEntry() {
           Photos
         </p>
 
-        {/* Two separate trigger buttons — critical for iPhone Safari reliability */}
         <div className="grid grid-cols-2 gap-2">
-          {/* Button 1: opens native camera directly */}
+          {/* Opens camera via iOS action sheet — no capture attr to avoid black screen */}
           <button
             onClick={() => cameraInputRef.current?.click()}
             className="rounded-xl bg-surface-container py-4 flex flex-col items-center justify-center gap-2 text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all active:scale-95"
@@ -128,7 +229,7 @@ export default function NewEntry() {
             <span className="text-[10px] font-bold uppercase tracking-widest">Take Photo</span>
           </button>
 
-          {/* Button 2: opens photo library picker (multi-select allowed) */}
+          {/* Opens photo library — multiple allowed since no capture attr */}
           <button
             onClick={() => libraryInputRef.current?.click()}
             className="rounded-xl bg-surface-container py-4 flex flex-col items-center justify-center gap-2 text-on-surface-variant hover:text-secondary hover:bg-surface-container-high transition-all active:scale-95"
@@ -138,7 +239,7 @@ export default function NewEntry() {
           </button>
         </div>
 
-        {/* Photo thumbnails — shared output for both inputs */}
+        {/* Thumbnails — fed by both inputs via shared handler */}
         {photos.length > 0 && (
           <div className="grid grid-cols-3 gap-2">
             {photos.map((src, idx) => (
@@ -155,13 +256,7 @@ export default function NewEntry() {
           </div>
         )}
 
-        {/*
-          INPUT 1 — camera / take photo.
-          NO capture attribute: capture="environment" causes a black screen on
-          Chrome for iOS (and is unreliable on iOS Safari too). Omitting it lets
-          iOS show its native action sheet ("Take Photo or Video / Photo Library
-          / Browse"), which works correctly in every iOS browser.
-        */}
+        {/* INPUT 1: no capture attr — prevents iOS Chrome black screen */}
         <input
           ref={cameraInputRef}
           type="file"
@@ -169,12 +264,7 @@ export default function NewEntry() {
           onChange={handlePhotoSelect}
           className="hidden"
         />
-
-        {/*
-          INPUT 2 — photo library picker.
-          multiple is fine here because capture is absent.
-          NO capture attribute — lets iOS show the full library sheet.
-        */}
+        {/* INPUT 2: library picker — multiple OK here since no capture attr */}
         <input
           ref={libraryInputRef}
           type="file"
@@ -210,7 +300,7 @@ export default function NewEntry() {
               {isRecording ? 'Recording… tap to stop' : audioUrl ? 'Re-record voice memo' : 'Record voice memo'}
             </p>
             <p className="text-xs text-on-surface-variant mt-0.5">
-              {audioUrl && !isRecording ? 'Memo saved' : 'Dictate your creative thoughts'}
+              {audioUrl && !isRecording ? 'Memo saved ✓' : 'Dictate your creative thoughts'}
             </p>
           </div>
           {isRecording && (
@@ -270,7 +360,7 @@ export default function NewEntry() {
         className="w-full py-4 text-base"
       >
         <span className="material-symbols-outlined">save</span>
-        Save Entry
+        {isSaving ? 'Saving…' : 'Save Entry'}
       </GlowButton>
     </div>
   )

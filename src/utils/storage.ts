@@ -53,6 +53,8 @@ export function getEntryById(id: string): CaptureEntry | undefined {
 }
 
 // Persist a new entry and return it with generated id + createdAt.
+// Throws if localStorage quota is exceeded (e.g. large base64 photos on iOS).
+// The caller (handleSave in NewEntry) catches this and shows a user-facing alert.
 export function saveEntry(data: NewCaptureEntry): CaptureEntry {
   const entry: CaptureEntry = {
     ...data,
@@ -60,7 +62,10 @@ export function saveEntry(data: NewCaptureEntry): CaptureEntry {
     createdAt: new Date().toISOString(),
   }
   const existing = getEntries()
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([entry, ...existing]))
+  const serialised = JSON.stringify([entry, ...existing])
+  console.log('[storage] writing', Math.round(serialised.length / 1024), 'KB to localStorage')
+  localStorage.setItem(STORAGE_KEY, serialised) // throws QuotaExceededError if too large
+  console.log('[storage] entry saved:', entry.id, '| photos:', entry.photos.length, '| audio:', !!entry.audioUrl)
   return entry
 }
 
