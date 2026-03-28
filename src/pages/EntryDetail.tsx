@@ -46,14 +46,23 @@ export default function EntryDetail() {
         >
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
-        {/* Delete trigger — first tap reveals the confirmation strip at the bottom */}
-        <button
-          onClick={() => setConfirmDelete(true)}
-          className="text-on-surface-variant/60 active:scale-95 transition-all hover:text-tertiary"
-          aria-label="Delete entry"
-        >
-          <span className="material-symbols-outlined text-[1.25rem]">delete</span>
-        </button>
+        {/* Edit + Delete actions — grouped on the right */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(`/entry/${entry.id}/edit`)}
+            className="text-on-surface-variant/60 active:scale-95 transition-all hover:text-primary"
+            aria-label="Edit entry"
+          >
+            <span className="material-symbols-outlined text-[1.25rem]">edit</span>
+          </button>
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="text-on-surface-variant/60 active:scale-95 transition-all hover:text-tertiary"
+            aria-label="Delete entry"
+          >
+            <span className="material-symbols-outlined text-[1.25rem]">delete</span>
+          </button>
+        </div>
       </div>
 
       {/* ── Title + meta ─────────────────────────────────── */}
