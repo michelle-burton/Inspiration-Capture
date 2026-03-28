@@ -156,15 +156,16 @@ export default function NewEntry() {
         )}
 
         {/*
-          INPUT 1 — camera capture only.
-          capture="environment" → rear camera on mobile.
-          NO multiple — iOS Safari does not support multiple + capture together.
+          INPUT 1 — camera / take photo.
+          NO capture attribute: capture="environment" causes a black screen on
+          Chrome for iOS (and is unreliable on iOS Safari too). Omitting it lets
+          iOS show its native action sheet ("Take Photo or Video / Photo Library
+          / Browse"), which works correctly in every iOS browser.
         */}
         <input
           ref={cameraInputRef}
           type="file"
           accept="image/*"
-          capture="environment"
           onChange={handlePhotoSelect}
           className="hidden"
         />
