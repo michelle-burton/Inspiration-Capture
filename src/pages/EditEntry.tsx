@@ -9,6 +9,7 @@ import {
   upsertTag,
   deleteAllEntryTags,
   addTagToEntry,
+  getTags,
 } from '../utils/db'
 import { SignedImage } from '../components/ui/SignedImage'
 import { Chip } from '../components/ui/Chip'
@@ -58,8 +59,9 @@ export default function EditEntry() {
   const [newPreviews,     setNewPreviews]     = useState<string[]>([])
 
   // Tags
-  const [tags,     setTags]     = useState<DraftTag[]>([])
-  const [tagInput, setTagInput] = useState('')
+  const [tags,          setTags]          = useState<DraftTag[]>([])
+  const [tagInput,      setTagInput]      = useState('')
+  const [availableTags, setAvailableTags] = useState<Tag[]>([])
 
   useEffect(() => {
     if (!id) return
@@ -86,6 +88,12 @@ export default function EditEntry() {
       setLoading(false)
     })
   }, [id])
+
+  useEffect(() => {
+    getTags().then(({ data }) => {
+      if (data) setAvailableTags(data)
+    })
+  }, [])
 
   // ── Photo handlers ──────────────────────────────────────────────────────────
   async function handlePhotoAdd(e: React.ChangeEvent<HTMLInputElement>) {
@@ -313,6 +321,24 @@ export default function EditEntry() {
       {/* Tags */}
       <section className="space-y-3">
         <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Tags</p>
+
+        {/* Available tags quick-select */}
+        {availableTags.filter(t => !tags.some(dt => dt.value === t.name)).length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {availableTags
+              .filter(t => !tags.some(dt => dt.value === t.name))
+              .map(t => (
+                <Chip
+                  key={t.id}
+                  label={t.name}
+                  color={t.color as TagColor}
+                  selected={false}
+                  onClick={() => addTag(t.name, t.color as TagColor)}
+                />
+              ))}
+          </div>
+        )}
+
         <div className="flex items-center gap-2 bg-surface-container rounded-xl px-3 py-2.5 focus-within:ring-1 focus-within:ring-primary/40">
           <span className="material-symbols-outlined text-on-surface-variant text-lg">sell</span>
           <input type="text" value={tagInput} onChange={e => setTagInput(e.target.value)} onKeyDown={handleTagKeyDown} placeholder="Type a tag and press Enter" className="flex-1 bg-transparent text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none" />
