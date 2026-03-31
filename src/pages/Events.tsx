@@ -33,7 +33,6 @@ export default function Events() {
     if (!title.trim()) return
     setCreating(true)
 
-    const { data: { user } } = await supabase.auth.getUser()
     const { data, error } = await createEvent({
       title:    title.trim(),
       slug:     slugify(title.trim()),

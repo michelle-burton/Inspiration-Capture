@@ -14,7 +14,7 @@ import { SignedImage } from '../components/ui/SignedImage'
 import { Chip } from '../components/ui/Chip'
 import { GlowButton } from '../components/ui/GlowButton'
 import { compressImage } from '../utils/image'
-import type { Entry, EntryImage, TagColor } from '../types'
+import type { Entry, EntryImage, Tag, TagColor } from '../types'
 
 type DraftTag = { value: string; color: TagColor }
 const COLOR_CYCLE: TagColor[] = ['cyan', 'purple', 'pink']
@@ -78,9 +78,9 @@ export default function EditEntry() {
       setIsFavorite(data.is_favorite)
       setExistingImages(data.entry_images ?? [])
       setTags(
-        (data.entry_tags ?? []).map(({ tag }, i) => ({
-          value: tag.name,
-          color: (tag.color as TagColor) ?? COLOR_CYCLE[i % COLOR_CYCLE.length],
+        (data.entry_tags ?? []).map((et: { tag: Tag }, i: number) => ({
+          value: et.tag.name,
+          color: (et.tag.color as TagColor) ?? COLOR_CYCLE[i % COLOR_CYCLE.length],
         }))
       )
       setLoading(false)
@@ -219,8 +219,6 @@ export default function EditEntry() {
       </div>
     )
   }
-
-  const selectedTagValues = new Set(tags.map(t => t.value))
 
   return (
     <div className="space-y-6 pb-10">
