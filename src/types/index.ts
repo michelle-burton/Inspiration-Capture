@@ -78,4 +78,4 @@ export type NewEntry = Omit<Entry,
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
-export type NavTab = 'home' | 'capture' | 'gallery'
+export type NavTab = 'home' | 'events'

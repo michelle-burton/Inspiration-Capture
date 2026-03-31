@@ -23,14 +23,14 @@ export default function App() {
           <Route path="events" element={<Events />} />
           <Route path="events/:eventId" element={<EventDetail />} />
 
-          {/* Per-event shell */}
+          {/* AppShell pages — bottom nav visible */}
           <Route element={<AppShell />}>
-            <Route index element={<Navigate to="/events" replace />} />
+            <Route index element={<Home />} />
             <Route path="events/:eventId/capture" element={<NewEntry />} />
             <Route path="events/:eventId/gallery" element={<Gallery />} />
             <Route path="entry/:id" element={<EntryDetail />} />
             <Route path="entry/:id/edit" element={<EditEntry />} />
-            <Route path="*" element={<Navigate to="/events" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Route>
       </Routes>
