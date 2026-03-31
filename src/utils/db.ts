@@ -44,13 +44,20 @@ export async function updateEvent(id: string, data: Partial<{
 
 // ── Entries ───────────────────────────────────────────────────────────────────
 
-export async function getEntries(eventId: string) {
+export async function getEntries(eventId: string, archived = false) {
   return supabase
     .from('entries')
     .select('*, entry_images(*), entry_tags(tag:tags(*))')
     .eq('event_id', eventId)
-    .eq('is_archived', false)
+    .eq('is_archived', archived)
     .order('created_at', { ascending: false })
+}
+
+export async function setArchived(id: string, value: boolean) {
+  return supabase
+    .from('entries')
+    .update({ is_archived: value, updated_at: new Date().toISOString() })
+    .eq('id', id)
 }
 
 export async function getEntryById(id: string) {
