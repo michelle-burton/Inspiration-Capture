@@ -1,38 +1,70 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useEntries } from '../hooks/useEntries'
-import { CaptureCard } from '../components/capture/CaptureCard'
+import { useState, useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { getEntries } from '../utils/db'
+import { SignedImage } from '../components/ui/SignedImage'
 import { Chip } from '../components/ui/Chip'
 import { GlowButton } from '../components/ui/GlowButton'
+import type { Entry, TagColor } from '../types'
 
-// Gallery page — filterable bento grid of all captures.
 export default function Gallery() {
-  const navigate = useNavigate()
-  const { entries } = useEntries()
+  const { eventId } = useParams<{ eventId: string }>()
+  const navigate    = useNavigate()
+
+  const [entries,   setEntries]   = useState<Entry[]>([])
+  const [loading,   setLoading]   = useState(true)
   const [activeTag, setActiveTag] = useState<string | null>(null)
 
-  // Collect all unique tag values and their first-seen color across entries
-  const tagMap = new Map<string, import('../types').TagColor>()
-  entries.forEach((e) => e.tags.forEach((t) => { if (!tagMap.has(t.value)) tagMap.set(t.value, t.color) }))
-  const allTags = Array.from(tagMap.entries()) // [value, color][]
+  useEffect(() => {
+    if (!eventId) return
+    getEntries(eventId).then(({ data }) => {
+      setEntries(data ?? [])
+      setLoading(false)
+    })
+  }, [eventId])
+
+  // Collect unique tags across all entries
+  const tagMap = new Map<string, TagColor>()
+  entries.forEach(e =>
+    e.entry_tags?.forEach(({ tag }) => {
+      if (!tagMap.has(tag.name)) tagMap.set(tag.name, tag.color as TagColor)
+    })
+  )
+  const allTags = Array.from(tagMap.entries())
 
   const filtered = activeTag
-    ? entries.filter((e) => e.tags.some((t) => t.value === activeTag))
+    ? entries.filter(e => e.entry_tags?.some(({ tag }) => tag.name === activeTag))
     : entries
 
-  // "All" chip uses neutral purple; individual chips use their stored color
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <span className="material-symbols-outlined animate-spin text-primary text-4xl">
+          progress_activity
+        </span>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
-      {/* ── Header ───────────────────────────────────────── */}
-      <div className="space-y-1 pt-1">
-        <h2 className="font-headline font-bold text-2xl text-on-surface">Gallery</h2>
-        <p className="text-on-surface-variant text-xs">
-          {entries.length} capture{entries.length !== 1 ? 's' : ''} saved
-        </p>
+
+      {/* Header */}
+      <div className="flex items-center gap-3 pt-1">
+        <button
+          onClick={() => navigate(`/events/${eventId}`)}
+          className="text-on-surface-variant active:scale-95 transition-transform"
+        >
+          <span className="material-symbols-outlined">arrow_back</span>
+        </button>
+        <div>
+          <h2 className="font-headline font-bold text-2xl text-on-surface">Gallery</h2>
+          <p className="text-on-surface-variant text-xs">
+            {entries.length} capture{entries.length !== 1 ? 's' : ''}
+          </p>
+        </div>
       </div>
 
-      {/* ── Tag filter ───────────────────────────────────── */}
+      {/* Tag filter */}
       {allTags.length > 0 && (
         <div className="flex flex-wrap gap-2">
           <Chip
@@ -40,19 +72,19 @@ export default function Gallery() {
             selected={activeTag === null}
             onClick={() => setActiveTag(null)}
           />
-          {allTags.map(([value, color]) => (
+          {allTags.map(([name, color]) => (
             <Chip
-              key={value}
-              label={value}
+              key={name}
+              label={name}
               color={color}
-              selected={activeTag === value}
-              onClick={() => setActiveTag(activeTag === value ? null : value)}
+              selected={activeTag === name}
+              onClick={() => setActiveTag(activeTag === name ? null : name)}
             />
           ))}
         </div>
       )}
 
-      {/* ── Grid ─────────────────────────────────────────── */}
+      {/* Grid */}
       {filtered.length === 0 ? (
         <div className="rounded-xl bg-surface-container p-10 flex flex-col items-center text-center gap-4">
           <span className="material-symbols-outlined text-on-surface-variant text-5xl">
@@ -67,15 +99,62 @@ export default function Gallery() {
             </p>
           </div>
           {!activeTag && (
-            <GlowButton variant="primary" onClick={() => navigate('/capture')} icon="add_a_photo">
+            <GlowButton
+              variant="primary"
+              onClick={() => navigate(`/events/${eventId}/capture`)}
+              icon="add_a_photo"
+            >
               New Capture
             </GlowButton>
           )}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3">
-          {filtered.map((entry) => (
-            <CaptureCard key={entry.id} entry={entry} />
+          {filtered.map(entry => (
+            <button
+              key={entry.id}
+              onClick={() => navigate(`/entry/${entry.id}`)}
+              className="text-left rounded-xl bg-surface-container overflow-hidden hover:bg-surface-container-high transition-all active:scale-[0.98]"
+            >
+              {/* Thumbnail */}
+              {entry.entry_images && entry.entry_images.length > 0 ? (
+                <SignedImage
+                  storagePath={entry.entry_images[0].storage_path}
+                  className="w-full h-32"
+                />
+              ) : (
+                <div className="w-full h-32 bg-surface-container-high flex items-center justify-center">
+                  <span className="material-symbols-outlined text-on-surface-variant text-3xl">
+                    {entry.source_type === 'text_only' ? 'notes' : 'image'}
+                  </span>
+                </div>
+              )}
+
+              {/* Info */}
+              <div className="p-3 space-y-1">
+                <p className="font-headline font-bold text-sm text-on-surface line-clamp-1">
+                  {entry.title || entry.booth_name || entry.artist_name || 'Untitled'}
+                </p>
+                {entry.visual_inspiration && (
+                  <p className="text-[11px] text-on-surface-variant line-clamp-2">
+                    {entry.visual_inspiration}
+                  </p>
+                )}
+                <div className="flex items-center justify-between pt-0.5">
+                  {entry.entry_tags && entry.entry_tags.length > 0 && (
+                    <span className="text-[10px] font-bold text-primary">
+                      {entry.entry_tags[0].tag.name}
+                      {entry.entry_tags.length > 1 && ` +${entry.entry_tags.length - 1}`}
+                    </span>
+                  )}
+                  {entry.is_favorite && (
+                    <span className="material-symbols-outlined text-primary text-sm material-symbols-filled ml-auto">
+                      favorite
+                    </span>
+                  )}
+                </div>
+              </div>
+            </button>
           ))}
         </div>
       )}

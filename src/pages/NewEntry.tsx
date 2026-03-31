@@ -1,30 +1,30 @@
 import { useState, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useEntries } from '../hooks/useEntries'
-import { TagInput } from '../components/capture/TagInput'
+import { useNavigate, useParams } from 'react-router-dom'
+import { supabase } from '../utils/supabase'
+import { createEntry, addEntryImage, upsertTag, addTagToEntry } from '../utils/db'
 import { GlowButton } from '../components/ui/GlowButton'
-import { defaultTitle } from '../utils/format'
-import type { NewCaptureEntry, Tag } from '../types'
+import { Chip } from '../components/ui/Chip'
 import { compressImage } from '../utils/image'
+import type { TagColor, SourceType } from '../types'
+
+// ── Local draft tag (before saving to DB) ────────────────────────────────────
+type DraftTag = { value: string; color: TagColor }
+
+const PRESET_TAGS: DraftTag[] = [
+  { value: 'celestial',    color: 'cyan'   },
+  { value: 'stickers',     color: 'purple' },
+  { value: 'dreamy',       color: 'pink'   },
+  { value: 'easy-to-make', color: 'cyan'   },
+  { value: 'merch',        color: 'purple' },
+  { value: 'ArtStyle',     color: 'pink'   },
+  { value: 'Packaging',    color: 'cyan'   },
+  { value: 'ColorPalette', color: 'purple' },
+  { value: 'Typography',   color: 'pink'   },
+  { value: 'Concept',      color: 'cyan'   },
+]
+const COLOR_CYCLE: TagColor[] = ['cyan', 'purple', 'pink']
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Pick the first MIME type the current browser's MediaRecorder actually supports.
- * iOS (Safari + Chrome) only supports audio/mp4 — audio/webm is a desktop-only format.
- */
-function getSupportedAudioMime(): string {
-  const candidates = [
-    'audio/mp4',
-    'audio/mp4;codecs=mp4a.40.2',
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-  ]
-  return candidates.find((t) => MediaRecorder.isTypeSupported(t)) ?? ''
-}
-
-/** Convert any Blob to a persistent base64 data URL via FileReader. */
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -34,172 +34,237 @@ function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
+async function uploadPhoto(
+  file: File,
+  userId: string,
+  entryId: string
+): Promise<{ storage_path: string; public_url: string; file_name: string; mime_type: string; file_size: number } | null> {
+  try {
+    const ext          = file.name.split('.').pop() ?? 'jpg'
+    const fileName     = `${Date.now()}.${ext}`
+    const storagePath  = `${userId}/${entryId}/${fileName}`
+
+    // Read and compress
+    const base64   = await blobToBase64(file)
+    const compressed = await compressImage(base64)
+
+    // Convert compressed base64 back to blob for upload
+    const res      = await fetch(compressed)
+    const blob     = await res.blob()
+
+    const { error } = await supabase.storage
+      .from('entry-images')
+      .upload(storagePath, blob, { contentType: blob.type, upsert: false })
+
+    if (error) {
+      console.error('[upload] storage error:', error.message)
+      return null
+    }
+
+    return {
+      storage_path: storagePath,
+      public_url:   '',          // generated at read-time via signed URL
+      file_name:    fileName,
+      mime_type:    blob.type,
+      file_size:    blob.size,
+    }
+  } catch (err) {
+    console.error('[upload] failed:', err)
+    return null
+  }
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
-
 export default function NewEntry() {
-  const navigate = useNavigate()
-  const { addEntry } = useEntries()
+  const { eventId } = useParams<{ eventId: string }>()
+  const navigate    = useNavigate()
 
-  // Two separate refs — iOS Safari/Chrome breaks when capture + multiple are on one input
   const cameraInputRef  = useRef<HTMLInputElement>(null)
   const libraryInputRef = useRef<HTMLInputElement>(null)
-  const mediaRef        = useRef<MediaRecorder | null>(null)
-  const audioChunks     = useRef<Blob[]>([])
 
-  const [title,        setTitle]        = useState(defaultTitle())
-  const [photos,       setPhotos]       = useState<string[]>([])
-  const [audioUrl,     setAudioUrl]     = useState<string>()
-  const [isRecording,  setIsRecording]  = useState(false)
-  const [isSaving,     setIsSaving]     = useState(false)
-  const [transcript,   setTranscript]   = useState('')
-  const [observations, setObservations] = useState('')
-  const [tags,         setTags]         = useState<Tag[]>([])
+  // Form state
+  const [title,              setTitle]              = useState('')
+  const [boothName,          setBoothName]          = useState('')
+  const [artistName,         setArtistName]         = useState('')
+  const [visualInspiration,  setVisualInspiration]  = useState('')
+  const [emotionalReaction,  setEmotionalReaction]  = useState('')
+  const [brandIdea,          setBrandIdea]          = useState('')
+  const [materialOrPhrase,   setMaterialOrPhrase]   = useState('')
+  const [notes,              setNotes]              = useState('')
+  const [priceRange,         setPriceRange]         = useState('')
+  const [isFavorite,         setIsFavorite]         = useState(false)
+  const [tags,               setTags]               = useState<DraftTag[]>([])
+  const [tagInput,           setTagInput]           = useState('')
 
-  // ── Photo handling ──────────────────────────────────────────────────────────
-  // Root cause of "photo not saved": iPhone photos are 4–10 MB. As base64 they
-  // exceed iOS localStorage's 5 MB quota → silent QuotaExceededError → entry
-  // never written. Fix: compress to ≤1200 px / JPEG 0.75 before storing.
-  function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
+  // Photo state — keep File objects for upload; base64 only for preview
+  const [photoFiles,    setPhotoFiles]    = useState<File[]>([])
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([])
+  const [sourceType,    setSourceType]    = useState<SourceType>('text_only')
+
+  const [isSaving, setIsSaving] = useState(false)
+
+  // ── Photo handling ───────────────────────────────────────────────────────
+  async function handlePhotoSelect(
+    e: React.ChangeEvent<HTMLInputElement>,
+    source: 'camera' | 'library'
+  ) {
     const files = Array.from(e.target.files ?? [])
-    e.target.value = '' // reset input so same photo can be re-selected
+    e.target.value = ''
+    if (files.length === 0) return
 
-    files.forEach((file) => {
-      const reader = new FileReader()
-      reader.onload = async (ev) => {
-        const raw        = ev.target?.result as string
-        const compressed = await compressImage(raw)
-        console.log('[photo] compressed to', Math.round(compressed.length / 1024), 'KB')
-        setPhotos((prev) => [...prev, compressed])
-      }
-      reader.readAsDataURL(file)
-    })
+    setSourceType(source)
+    for (const file of files) {
+      const base64     = await blobToBase64(file)
+      const compressed = await compressImage(base64)
+      setPhotoFiles(prev  => [...prev, file])
+      setPhotoPreviews(prev => [...prev, compressed])
+    }
   }
 
   function removePhoto(idx: number) {
-    setPhotos((prev) => prev.filter((_, i) => i !== idx))
+    setPhotoFiles(prev    => prev.filter((_, i) => i !== idx))
+    setPhotoPreviews(prev => prev.filter((_, i) => i !== idx))
   }
 
-  // ── Voice recording ─────────────────────────────────────────────────────────
-  // Root cause of "recording error": two problems stacked:
-  //   1. `new Blob(chunks, { type: 'audio/webm' })` — iOS only supports audio/mp4.
-  //      Mislabelling the blob makes the <audio> element refuse to play it.
-  //   2. URL.createObjectURL() produces an ephemeral blob: URL that dies after
-  //      navigation. Even if localStorage wrote it, it's an unresolvable pointer
-  //      on any reload. Must convert to base64 before saving.
-  async function toggleRecording() {
-    if (isRecording) {
-      mediaRef.current?.stop()
-      setIsRecording(false)
-      return
-    }
+  // ── Tag handling ─────────────────────────────────────────────────────────
+  function addTag(value: string, color?: TagColor) {
+    const clean = value.trim().replace(/^#/, '')
+    if (!clean || tags.some(t => t.value === clean)) return
+    const resolvedColor = color ?? COLOR_CYCLE[tags.length % COLOR_CYCLE.length]
+    setTags(prev => [...prev, { value: clean, color: resolvedColor }])
+  }
 
-    if (!window.MediaRecorder) {
-      alert('Voice recording is not supported on this browser.')
-      return
+  function removeTag(value: string) {
+    setTags(prev => prev.filter(t => t.value !== value))
+  }
+
+  function handleTagKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if ((e.key === 'Enter' || e.key === ',') && tagInput.trim()) {
+      e.preventDefault()
+      addTag(tagInput)
+      setTagInput('')
     }
+    if (e.key === 'Backspace' && !tagInput && tags.length > 0) {
+      removeTag(tags[tags.length - 1].value)
+    }
+  }
+
+  // ── Save ─────────────────────────────────────────────────────────────────
+  async function handleSave() {
+    if (!eventId) return
+    setIsSaving(true)
 
     try {
-      const stream   = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mimeType = getSupportedAudioMime()
-      console.log('[audio] using mimeType:', mimeType || '(browser default)')
+      // 1. Get user
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not authenticated')
 
-      const recorderOpts = mimeType ? { mimeType } : {}
-      const recorder     = new MediaRecorder(stream, recorderOpts)
-      audioChunks.current = []
+      // 2. Determine source_type
+      const finalSource: SourceType =
+        photoFiles.length > 0 ? sourceType : 'text_only'
 
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunks.current.push(e.data)
-      }
+      // 3. Save entry
+      const { data: entry, error: entryError } = await createEntry({
+        event_id:           eventId,
+        title:              title.trim() || null,
+        booth_name:         boothName.trim() || null,
+        artist_name:        artistName.trim() || null,
+        visual_inspiration: visualInspiration.trim() || null,
+        emotional_reaction: emotionalReaction.trim() || null,
+        brand_idea:         brandIdea.trim() || null,
+        material_or_phrase: materialOrPhrase.trim() || null,
+        notes:              notes.trim() || null,
+        price_range:        priceRange.trim() || null,
+        source_type:        finalSource,
+        is_favorite:        isFavorite,
+        is_archived:        false,
+        captured_at:        new Date().toISOString(),
+      })
 
-      recorder.onerror = (e) => {
-        console.error('[audio] MediaRecorder error:', e)
-        setIsRecording(false)
-        stream.getTracks().forEach((t) => t.stop())
-        alert('Recording failed. Please try again.')
-      }
+      if (entryError || !entry) throw new Error(entryError?.message ?? 'Entry save failed')
 
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop())
-        const effectiveMime = mimeType || recorder.mimeType || 'audio/mp4'
-        const blob = new Blob(audioChunks.current, { type: effectiveMime })
-        console.log('[audio] blob size:', blob.size, 'bytes, type:', blob.type)
-        try {
-          const base64 = await blobToBase64(blob)
-          console.log('[audio] base64 length:', base64.length)
-          setAudioUrl(base64)
-        } catch (err) {
-          console.error('[audio] base64 conversion failed:', err)
-          alert('Audio could not be processed. Please try again.')
+      // 4. Upload photos
+      for (const file of photoFiles) {
+        const imgData = await uploadPhoto(file, user.id, entry.id)
+        if (imgData) {
+          await addEntryImage({ entry_id: entry.id, ...imgData })
         }
       }
 
-      // timeslice=250ms: collect chunks periodically — safer on iOS than waiting for stop
-      recorder.start(250)
-      mediaRef.current = recorder
-      setIsRecording(true)
-    } catch (err) {
-      console.error('[audio] getUserMedia failed:', err)
-      alert('Microphone access denied.')
-    }
-  }
+      // 5. Save tags
+      for (const draftTag of tags) {
+        const { data: savedTag } = await upsertTag(draftTag.value, draftTag.color)
+        if (savedTag) {
+          await addTagToEntry(entry.id, savedTag.id)
+        }
+      }
 
-  // ── Save ────────────────────────────────────────────────────────────────────
-  async function handleSave() {
-    setIsSaving(true)
-    const source: NewCaptureEntry['source'] =
-      photos.length > 0 && audioUrl ? 'mixed'
-      : photos.length > 0           ? 'photo'
-      : audioUrl                    ? 'voice'
-      :                               'text'
+      navigate(`/events/${eventId}`, { replace: true })
 
-    try {
-      console.log('[save] photos:', photos.length, '| audioUrl:', !!audioUrl, '| source:', source)
-      addEntry({ title, photos, audioUrl, transcript, observations, tags, source })
-      console.log('[save] entry written to localStorage ✓')
-      navigate('/', { replace: true })
     } catch (err) {
-      console.error('[save] localStorage write failed:', err)
+      console.error('[save] failed:', err)
+      alert('Save failed. Please try again.')
       setIsSaving(false)
-      alert(
-        photos.length > 0
-          ? 'Save failed — photos may be too large. Try fewer photos or use From Library.'
-          : 'Save failed. Please try again.'
-      )
     }
   }
 
-  const canSave = !isSaving && title.trim().length > 0 && (photos.length > 0 || audioUrl || observations.trim())
+  const hasContent = boothName || artistName || visualInspiration || notes || photoFiles.length > 0
+  const canSave    = !isSaving && !!hasContent
+
+  const selectedTagValues = new Set(tags.map(t => t.value))
 
   return (
-    <div className="space-y-6">
-      {/* ── Header ───────────────────────────────────────── */}
+    <div className="space-y-6 pb-10">
+
+      {/* ── Header ─────────────────────────────────────────── */}
       <div className="flex items-center justify-between pt-1">
-        <button onClick={() => navigate(-1)} className="text-on-surface-variant active:scale-95 transition-transform">
+        <button
+          onClick={() => navigate(`/events/${eventId}`)}
+          className="text-on-surface-variant active:scale-95 transition-transform"
+        >
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
-        <h2 className="font-headline font-bold text-base text-on-surface">New Entry</h2>
-        <GlowButton variant="primary" onClick={handleSave} disabled={!canSave}>
-          {isSaving ? 'Saving…' : 'Save'}
-        </GlowButton>
+        <h2 className="font-headline font-bold text-base text-on-surface">New Capture</h2>
+        <div className="flex items-center gap-3">
+          {/* Favorite toggle */}
+          <button onClick={() => setIsFavorite(f => !f)} className="active:scale-95 transition-transform">
+            <span className={`material-symbols-outlined text-2xl ${isFavorite ? 'text-primary material-symbols-filled' : 'text-on-surface-variant'}`}>
+              favorite
+            </span>
+          </button>
+          <GlowButton variant="primary" onClick={handleSave} disabled={!canSave}>
+            {isSaving ? 'Saving…' : 'Save'}
+          </GlowButton>
+        </div>
       </div>
 
-      {/* ── Title ────────────────────────────────────────── */}
-      <input
-        type="text"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        placeholder="Entry title"
-        className="w-full bg-transparent font-headline font-bold text-2xl text-on-surface placeholder:text-on-surface-variant/40 outline-none border-b border-outline-variant/20 pb-2 focus:border-primary/40 transition-colors"
-      />
+      {/* ── Booth + Artist ─────────────────────────────────── */}
+      <section className="space-y-3">
+        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
+          Who / Where
+        </p>
+        <input
+          type="text"
+          value={boothName}
+          onChange={e => setBoothName(e.target.value)}
+          placeholder="Booth name"
+          className="w-full bg-surface-container rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:ring-1 focus:ring-primary/40 transition-all"
+        />
+        <input
+          type="text"
+          value={artistName}
+          onChange={e => setArtistName(e.target.value)}
+          placeholder="Artist name"
+          className="w-full bg-surface-container rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:ring-1 focus:ring-primary/40 transition-all"
+        />
+      </section>
 
-      {/* ── Photo capture ────────────────────────────────── */}
+      {/* ── Photos ─────────────────────────────────────────── */}
       <section className="space-y-3">
         <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
           Photos
         </p>
-
         <div className="grid grid-cols-2 gap-2">
-          {/* Opens camera via iOS action sheet — no capture attr to avoid black screen */}
           <button
             onClick={() => cameraInputRef.current?.click()}
             className="rounded-xl bg-surface-container py-4 flex flex-col items-center justify-center gap-2 text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all active:scale-95"
@@ -207,8 +272,6 @@ export default function NewEntry() {
             <span className="material-symbols-outlined text-2xl">photo_camera</span>
             <span className="text-[10px] font-bold uppercase tracking-widest">Take Photo</span>
           </button>
-
-          {/* Opens photo library — multiple allowed since no capture attr */}
           <button
             onClick={() => libraryInputRef.current?.click()}
             className="rounded-xl bg-surface-container py-4 flex flex-col items-center justify-center gap-2 text-on-surface-variant hover:text-secondary hover:bg-surface-container-high transition-all active:scale-95"
@@ -218,11 +281,10 @@ export default function NewEntry() {
           </button>
         </div>
 
-        {/* Thumbnails — fed by both inputs via shared handler */}
-        {photos.length > 0 && (
+        {photoPreviews.length > 0 && (
           <div className="grid grid-cols-3 gap-2">
-            {photos.map((src, idx) => (
-              <div key={idx} className="aspect-square rounded-xl overflow-hidden relative group">
+            {photoPreviews.map((src, idx) => (
+              <div key={idx} className="aspect-square rounded-xl overflow-hidden relative">
                 <img src={src} alt={`photo ${idx + 1}`} className="w-full h-full object-cover" />
                 <button
                   onClick={() => removePhoto(idx)}
@@ -235,103 +297,111 @@ export default function NewEntry() {
           </div>
         )}
 
-        {/* INPUT 1: no capture attr — prevents iOS Chrome black screen */}
-        <input
-          ref={cameraInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handlePhotoSelect}
-          className="hidden"
-        />
-        {/* INPUT 2: library picker — multiple OK here since no capture attr */}
-        <input
-          ref={libraryInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={handlePhotoSelect}
-          className="hidden"
-        />
+        <input ref={cameraInputRef}  type="file" accept="image/*"          onChange={e => handlePhotoSelect(e, 'camera')}  className="hidden" />
+        <input ref={libraryInputRef} type="file" accept="image/*" multiple onChange={e => handlePhotoSelect(e, 'library')} className="hidden" />
       </section>
 
-      {/* ── Voice memo ───────────────────────────────────── */}
+      {/* ── Inspiration fields ─────────────────────────────── */}
       <section className="space-y-3">
         <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
-          Voice Memo
-        </p>
-        <button
-          onClick={toggleRecording}
-          className={`
-            w-full rounded-xl p-5 flex items-center gap-4 transition-all active:scale-[0.98]
-            ${isRecording
-              ? 'bg-tertiary/10 ring-1 ring-tertiary/40'
-              : 'bg-surface-container-high hover:bg-surface-container-highest'
-            }
-          `}
-        >
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${isRecording ? 'bg-tertiary shadow-neon-pink' : 'bg-secondary-container/30'}`}>
-            <span className={`material-symbols-outlined text-2xl ${isRecording ? 'text-on-tertiary material-symbols-filled' : 'text-secondary'}`}>
-              {isRecording ? 'stop' : 'mic'}
-            </span>
-          </div>
-          <div className="text-left">
-            <p className="font-headline font-bold text-sm text-on-surface">
-              {isRecording ? 'Recording… tap to stop' : audioUrl ? 'Re-record voice memo' : 'Record voice memo'}
-            </p>
-            <p className="text-xs text-on-surface-variant mt-0.5">
-              {audioUrl && !isRecording ? 'Memo saved ✓' : 'Dictate your creative thoughts'}
-            </p>
-          </div>
-          {isRecording && (
-            <div className="ml-auto flex gap-0.5">
-              {[3, 6, 4, 7, 2, 5].map((h, i) => (
-                <div key={i} className="w-1 rounded-full bg-tertiary animate-pulse" style={{ height: `${h * 3}px`, animationDelay: `${i * 80}ms` }} />
-              ))}
-            </div>
-          )}
-        </button>
-        {audioUrl && !isRecording && (
-          <audio controls src={audioUrl} className="w-full h-10 accent-primary" />
-        )}
-      </section>
-
-      {/* ── Transcript / notes ───────────────────────────── */}
-      <section className="space-y-2">
-        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
-          Transcript / Notes
+          What You Noticed
         </p>
         <textarea
-          value={transcript}
-          onChange={(e) => setTranscript(e.target.value)}
-          placeholder="Any notes or voice transcript…"
+          value={visualInspiration}
+          onChange={e => setVisualInspiration(e.target.value)}
+          placeholder="Visual inspiration — what caught your eye?"
+          rows={2}
+          className="w-full bg-surface-container rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none resize-none focus:ring-1 focus:ring-primary/40 transition-all"
+        />
+        <textarea
+          value={emotionalReaction}
+          onChange={e => setEmotionalReaction(e.target.value)}
+          placeholder="Emotional reaction — how did it make you feel?"
+          rows={2}
+          className="w-full bg-surface-container rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none resize-none focus:ring-1 focus:ring-primary/40 transition-all"
+        />
+        <textarea
+          value={brandIdea}
+          onChange={e => setBrandIdea(e.target.value)}
+          placeholder="Brand idea — how does this connect to your work?"
+          rows={2}
+          className="w-full bg-surface-container rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none resize-none focus:ring-1 focus:ring-primary/40 transition-all"
+        />
+      </section>
+
+      {/* ── Details ────────────────────────────────────────── */}
+      <section className="space-y-3">
+        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
+          Details
+        </p>
+        <input
+          type="text"
+          value={materialOrPhrase}
+          onChange={e => setMaterialOrPhrase(e.target.value)}
+          placeholder="Material or phrase that stood out"
+          className="w-full bg-surface-container rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:ring-1 focus:ring-primary/40 transition-all"
+        />
+        <input
+          type="text"
+          value={priceRange}
+          onChange={e => setPriceRange(e.target.value)}
+          placeholder="Price range (e.g. $10–$40)"
+          className="w-full bg-surface-container rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:ring-1 focus:ring-primary/40 transition-all"
+        />
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          placeholder="Any other notes…"
           rows={3}
-          className="w-full bg-surface-container-lowest rounded-md px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none resize-none font-body focus:outline focus:outline-1 focus:outline-primary/40 transition-all"
+          className="w-full bg-surface-container rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none resize-none focus:ring-1 focus:ring-primary/40 transition-all"
         />
       </section>
 
-      {/* ── Observations ─────────────────────────────────── */}
-      <section className="space-y-2">
-        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
-          Key Observations
-        </p>
-        <textarea
-          value={observations}
-          onChange={(e) => setObservations(e.target.value)}
-          placeholder="What stood out? Patterns, ideas, insights…"
-          rows={4}
-          className="w-full bg-surface-container-lowest rounded-md px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none resize-none font-body focus:outline focus:outline-1 focus:outline-primary/40 transition-all"
-        />
-      </section>
-
-      {/* ── Tags ─────────────────────────────────────────── */}
-      <section className="space-y-2">
+      {/* ── Tags ───────────────────────────────────────────── */}
+      <section className="space-y-3">
         <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
           Tags
         </p>
-        <TagInput tags={tags} onChange={setTags} />
+        <div className="flex items-center gap-2 bg-surface-container rounded-xl px-3 py-2.5 focus-within:ring-1 focus-within:ring-primary/40 transition-all">
+          <span className="material-symbols-outlined text-on-surface-variant text-lg">sell</span>
+          <input
+            type="text"
+            value={tagInput}
+            onChange={e => setTagInput(e.target.value)}
+            onKeyDown={handleTagKeyDown}
+            placeholder="Type a tag and press Enter"
+            className="flex-1 bg-transparent text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none"
+          />
+        </div>
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {tags.map(tag => (
+              <Chip key={tag.value} label={tag.value} color={tag.color} selected onRemove={() => removeTag(tag.value)} />
+            ))}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {PRESET_TAGS.filter(t => !selectedTagValues.has(t.value)).map(tag => (
+            <Chip key={tag.value} label={tag.value} color={tag.color} onClick={() => addTag(tag.value, tag.color)} />
+          ))}
+        </div>
       </section>
 
-      {/* ── Save footer ──────────────────────────────────── */}
+      {/* ── Optional title ─────────────────────────────────── */}
+      <section className="space-y-2">
+        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
+          Custom Title (optional)
+        </p>
+        <input
+          type="text"
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          placeholder="Leave blank to use booth/artist name"
+          className="w-full bg-surface-container rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:ring-1 focus:ring-primary/40 transition-all"
+        />
+      </section>
+
+      {/* ── Save footer ────────────────────────────────────── */}
       <GlowButton
         variant="primary"
         onClick={handleSave}
@@ -339,8 +409,9 @@ export default function NewEntry() {
         className="w-full py-4 text-base"
       >
         <span className="material-symbols-outlined">save</span>
-        {isSaving ? 'Saving…' : 'Save Entry'}
+        {isSaving ? 'Saving…' : 'Save Capture'}
       </GlowButton>
+
     </div>
   )
 }

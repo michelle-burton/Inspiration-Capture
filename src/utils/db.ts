@@ -18,9 +18,10 @@ export async function createEvent(data: {
   start_date?: string
   end_date?: string
 }) {
+  const { data: { user } } = await supabase.auth.getUser()
   return supabase
     .from('events')
-    .insert(data)
+    .insert({ ...data, user_id: user?.id })
     .select()
     .single()
 }
@@ -61,9 +62,10 @@ export async function getEntryById(id: string) {
 }
 
 export async function createEntry(data: NewEntry) {
+  const { data: { user } } = await supabase.auth.getUser()
   return supabase
     .from('entries')
-    .insert(data)
+    .insert({ ...data, user_id: user?.id })
     .select()
     .single()
 }
@@ -101,9 +103,10 @@ export async function getTags() {
 }
 
 export async function upsertTag(name: string, color: string) {
+  const { data: { user } } = await supabase.auth.getUser()
   return supabase
     .from('tags')
-    .upsert({ name, color }, { onConflict: 'user_id,name' })
+    .upsert({ name, color, user_id: user?.id }, { onConflict: 'user_id,name' })
     .select()
     .single()
 }
@@ -120,6 +123,13 @@ export async function removeTagFromEntry(entryId: string, tagId: string) {
     .delete()
     .eq('entry_id', entryId)
     .eq('tag_id', tagId)
+}
+
+export async function deleteAllEntryTags(entryId: string) {
+  return supabase
+    .from('entry_tags')
+    .delete()
+    .eq('entry_id', entryId)
 }
 
 // ── Images ────────────────────────────────────────────────────────────────────

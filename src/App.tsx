@@ -3,6 +3,7 @@ import { AppShell } from './components/layout/AppShell'
 import { AuthGuard } from './components/layout/AuthGuard'
 import Login from './pages/Login'
 import Events from './pages/Events'
+import EventDetail from './pages/EventDetail'
 import Home from './pages/Home'
 import NewEntry from './pages/NewEntry'
 import Gallery from './pages/Gallery'
@@ -20,6 +21,7 @@ export default function App() {
         <Route element={<AuthGuard />}>
           {/* Events hub — landing page after login */}
           <Route path="events" element={<Events />} />
+          <Route path="events/:eventId" element={<EventDetail />} />
 
           {/* Per-event shell */}
           <Route element={<AppShell />}>

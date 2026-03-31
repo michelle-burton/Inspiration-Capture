@@ -1,110 +1,126 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useEntries } from '../hooks/useEntries'
+import { getEntryById, deleteEntry } from '../utils/db'
+import { SignedImage } from '../components/ui/SignedImage'
 import { Chip } from '../components/ui/Chip'
 import { GlowButton } from '../components/ui/GlowButton'
 import { formatDate, formatTime } from '../utils/format'
+import type { Entry, TagColor } from '../types'
 
-// Entry Detail — full view of a single capture.
-// Displays photo gallery, audio playback, transcript, tags, observations.
 export default function EntryDetail() {
-  const { id } = useParams<{ id: string }>()
+  const { id }   = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { getById, removeEntry } = useEntries()
-  const [activePhoto, setActivePhoto] = useState(0)
+
+  const [entry,         setEntry]         = useState<Entry | null>(null)
+  const [loading,       setLoading]       = useState(true)
+  const [activePhoto,   setActivePhoto]   = useState(0)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting,      setDeleting]      = useState(false)
 
-  const entry = id ? getById(id) : undefined
+  useEffect(() => {
+    if (!id) return
+    getEntryById(id).then(({ data }) => {
+      setEntry(data)
+      setLoading(false)
+    })
+  }, [id])
 
-  if (!entry) {
+  async function handleDelete() {
+    if (!entry) return
+    setDeleting(true)
+    await deleteEntry(entry.id)
+    navigate(`/events/${entry.event_id}`, { replace: true })
+  }
+
+  if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center">
-        <span className="material-symbols-outlined text-on-surface-variant text-5xl">
-          search_off
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <span className="material-symbols-outlined animate-spin text-primary text-4xl">
+          progress_activity
         </span>
-        <p className="font-headline font-bold text-on-surface">Entry not found</p>
-        <GlowButton variant="secondary" onClick={() => navigate('/gallery')}>
-          Back to Gallery
-        </GlowButton>
       </div>
     )
   }
 
-  function handleDelete() {
-    if (!entry) return
-    removeEntry(entry.id)
-    navigate('/gallery', { replace: true })
+  if (!entry) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center">
+        <span className="material-symbols-outlined text-on-surface-variant text-5xl">search_off</span>
+        <p className="font-headline font-bold text-on-surface">Entry not found</p>
+        <GlowButton variant="secondary" onClick={() => navigate(-1)}>Go back</GlowButton>
+      </div>
+    )
   }
 
+  const images = entry.entry_images ?? []
+  const tags   = entry.entry_tags   ?? []
+
   return (
-    <div className="space-y-6">
-      {/* ── Nav bar ──────────────────────────────────────── */}
+    <div className="space-y-6 pb-10">
+
+      {/* Nav */}
       <div className="flex items-center justify-between pt-1">
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => navigate(`/events/${entry.event_id}`)}
           className="text-on-surface-variant active:scale-95 transition-transform"
         >
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
-        {/* Edit + Delete actions — grouped on the right */}
         <div className="flex items-center gap-3">
+          {entry.is_favorite && (
+            <span className="material-symbols-outlined text-primary material-symbols-filled">favorite</span>
+          )}
           <button
             onClick={() => navigate(`/entry/${entry.id}/edit`)}
-            className="text-on-surface-variant/60 active:scale-95 transition-all hover:text-primary"
-            aria-label="Edit entry"
+            className="text-on-surface-variant/60 hover:text-primary active:scale-95 transition-all"
           >
             <span className="material-symbols-outlined text-[1.25rem]">edit</span>
           </button>
           <button
             onClick={() => setConfirmDelete(true)}
-            className="text-on-surface-variant/60 active:scale-95 transition-all hover:text-tertiary"
-            aria-label="Delete entry"
+            className="text-on-surface-variant/60 hover:text-tertiary active:scale-95 transition-all"
           >
             <span className="material-symbols-outlined text-[1.25rem]">delete</span>
           </button>
         </div>
       </div>
 
-      {/* ── Title + meta ─────────────────────────────────── */}
+      {/* Title + meta */}
       <div className="space-y-1">
         <h2 className="font-headline font-bold text-2xl text-on-surface leading-tight">
-          {entry.title}
+          {entry.title || entry.booth_name || entry.artist_name || 'Untitled'}
         </h2>
-        <div className="flex items-center gap-3 text-on-surface-variant text-xs">
-          <span className="flex items-center gap-1">
-            <span className="material-symbols-outlined text-sm">schedule</span>
-            {formatDate(entry.createdAt)}
-          </span>
-          <span className="text-outline">·</span>
-          <span>{formatTime(entry.createdAt)}</span>
-          <span className="text-outline">·</span>
-          <span className="capitalize">{entry.source}</span>
+        <div className="flex items-center gap-2 text-on-surface-variant text-xs flex-wrap">
+          {entry.booth_name && <span>{entry.booth_name}</span>}
+          {entry.booth_name && entry.artist_name && <span>·</span>}
+          {entry.artist_name && <span>{entry.artist_name}</span>}
+          {(entry.booth_name || entry.artist_name) && <span>·</span>}
+          <span>{formatDate(entry.created_at)}</span>
+          <span>·</span>
+          <span>{formatTime(entry.created_at)}</span>
         </div>
       </div>
 
-      {/* ── Photo gallery ────────────────────────────────── */}
-      {entry.photos.length > 0 && (
+      {/* Photo gallery */}
+      {images.length > 0 && (
         <section className="space-y-2">
           <div className="aspect-video rounded-xl overflow-hidden bg-surface-container-low">
-            <img
-              src={entry.photos[activePhoto]}
-              alt={`Photo ${activePhoto + 1}`}
-              className="w-full h-full object-cover"
+            <SignedImage
+              storagePath={images[activePhoto].storage_path}
+              className="w-full h-full"
             />
           </div>
-          {entry.photos.length > 1 && (
+          {images.length > 1 && (
             <div className="flex gap-2 overflow-x-auto pb-1">
-              {entry.photos.map((src, idx) => (
+              {images.map((img, idx) => (
                 <button
-                  key={idx}
+                  key={img.id}
                   onClick={() => setActivePhoto(idx)}
                   className={`flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden transition-all ${
-                    idx === activePhoto
-                      ? 'ring-2 ring-primary'
-                      : 'opacity-50 hover:opacity-80'
+                    idx === activePhoto ? 'ring-2 ring-primary' : 'opacity-50 hover:opacity-80'
                   }`}
                 >
-                  <img src={src} alt={`thumb ${idx + 1}`} className="w-full h-full object-cover" />
+                  <SignedImage storagePath={img.storage_path} className="w-full h-full" />
                 </button>
               ))}
             </div>
@@ -112,66 +128,41 @@ export default function EntryDetail() {
         </section>
       )}
 
-      {/* ── Audio playback ───────────────────────────────── */}
-      {entry.audioUrl && (
-        <section className="space-y-2">
+      {/* Fields */}
+      {[
+        { label: 'Visual Inspiration',  value: entry.visual_inspiration  },
+        { label: 'Emotional Reaction',  value: entry.emotional_reaction  },
+        { label: 'Brand Idea',          value: entry.brand_idea          },
+        { label: 'Material or Phrase',  value: entry.material_or_phrase  },
+        { label: 'Notes',               value: entry.notes               },
+        { label: 'Price Range',         value: entry.price_range         },
+      ].filter(f => f.value).map(field => (
+        <section key={field.label} className="space-y-2">
           <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
-            Voice Memo
-          </p>
-          <div className="bg-surface-container-high rounded-xl p-4 flex items-center gap-4">
-            <div className="w-10 h-10 rounded-full bg-secondary-container/30 flex items-center justify-center flex-shrink-0">
-              <span className="material-symbols-outlined text-secondary material-symbols-filled">mic</span>
-            </div>
-            <audio controls src={entry.audioUrl} className="flex-1 h-10 accent-primary" />
-          </div>
-        </section>
-      )}
-
-      {/* ── Transcript ───────────────────────────────────── */}
-      {entry.transcript && (
-        <section className="space-y-2">
-          <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
-            Transcript / Notes
+            {field.label}
           </p>
           <div className="bg-surface-container rounded-xl p-4">
-            <p className="text-sm text-on-surface font-body leading-relaxed whitespace-pre-wrap">
-              {entry.transcript}
+            <p className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap">
+              {field.value}
             </p>
           </div>
         </section>
-      )}
+      ))}
 
-      {/* ── Observations ─────────────────────────────────── */}
-      {entry.observations && (
+      {/* Tags */}
+      {tags.length > 0 && (
         <section className="space-y-2">
-          <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
-            Key Observations
-          </p>
-          <div className="bg-surface-container rounded-xl p-4">
-            <p className="text-sm text-on-surface font-body leading-relaxed whitespace-pre-wrap">
-              {entry.observations}
-            </p>
-          </div>
-        </section>
-      )}
-
-      {/* ── Tags ─────────────────────────────────────────── */}
-      {entry.tags.length > 0 && (
-        <section className="space-y-2">
-          <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
-            Tags
-          </p>
+          <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Tags</p>
           <div className="flex flex-wrap gap-2">
-            {entry.tags.map((tag) => (
-              <Chip key={tag.value} label={tag.value} color={tag.color} selected />
+            {tags.map(({ tag }) => (
+              <Chip key={tag.id} label={tag.name} color={tag.color as TagColor} selected />
             ))}
           </div>
         </section>
       )}
 
-      {/* ── Footer actions ───────────────────────────────── */}
+      {/* Delete confirmation */}
       {confirmDelete ? (
-        /* ── Confirmation strip — replaces footer when delete is tapped ── */
         <div className="rounded-2xl bg-surface-container ring-1 ring-tertiary/30 p-4 space-y-3">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-tertiary/10 flex items-center justify-center flex-shrink-0">
@@ -185,26 +176,34 @@ export default function EntryDetail() {
           <div className="flex gap-2">
             <button
               onClick={() => setConfirmDelete(false)}
-              className="flex-1 rounded-xl py-3 bg-surface-container-high text-sm font-bold text-on-surface-variant active:scale-95 transition-all hover:bg-surface-container-highest"
+              className="flex-1 rounded-xl py-3 bg-surface-container-high text-sm font-bold text-on-surface-variant active:scale-95"
             >
               Cancel
             </button>
             <button
               onClick={handleDelete}
-              className="flex-1 rounded-xl py-3 bg-tertiary/10 ring-1 ring-tertiary/40 text-sm font-bold text-tertiary active:scale-95 transition-all hover:bg-tertiary/20"
+              disabled={deleting}
+              className="flex-1 rounded-xl py-3 bg-tertiary/10 ring-1 ring-tertiary/40 text-sm font-bold text-tertiary active:scale-95 disabled:opacity-40"
             >
-              Delete
+              {deleting ? 'Deleting…' : 'Delete'}
             </button>
           </div>
         </div>
       ) : (
-        /* ── Normal footer ────────────────────────────────────────────── */
         <div className="flex gap-3 pt-2">
-          <GlowButton variant="secondary" onClick={() => navigate('/gallery')} className="flex-1">
-            <span className="material-symbols-outlined text-base">arrow_back</span>
+          <GlowButton
+            variant="secondary"
+            onClick={() => navigate(`/events/${entry.event_id}/gallery`)}
+            className="flex-1"
+          >
+            <span className="material-symbols-outlined text-base">photo_library</span>
             Gallery
           </GlowButton>
-          <GlowButton variant="primary" onClick={() => navigate('/capture')} className="flex-1">
+          <GlowButton
+            variant="primary"
+            onClick={() => navigate(`/events/${entry.event_id}/capture`)}
+            className="flex-1"
+          >
             <span className="material-symbols-outlined text-base">add_a_photo</span>
             New Capture
           </GlowButton>
