@@ -17,6 +17,8 @@ export default function EventDetail() {
   const [archivedList,  setArchivedList]  = useState<Entry[]>([])
   const [loading,       setLoading]       = useState(true)
   const [filter,        setFilter]        = useState<FilterMode>('all')
+  const [searchQuery,   setSearchQuery]   = useState('')
+  const [activeTag,     setActiveTag]     = useState<string | null>(null)
 
   // ── Bulk select state ───────────────────────────────────────────────────────
   const [selectMode,  setSelectMode]  = useState(false)
@@ -36,6 +38,13 @@ export default function EventDetail() {
   }, [eventId])
 
   useEffect(() => { loadData() }, [loadData])
+
+  // ── Filter mode switch ──────────────────────────────────────────────────────
+  function switchFilter(mode: FilterMode) {
+    setFilter(mode)
+    setSearchQuery('')
+    setActiveTag(null)
+  }
 
   // ── Select mode helpers ─────────────────────────────────────────────────────
   function enterSelectMode() {
@@ -116,10 +125,38 @@ export default function EventDetail() {
   const favoriteCount = entries.filter(e => e.is_favorite).length
   const archivedCount = archivedList.length
 
-  const displayed =
+  // Base list for current filter mode
+  const baseList =
     filter === 'favorites' ? entries.filter(e => e.is_favorite) :
     filter === 'archived'  ? archivedList :
                              entries
+
+  // Collect unique tags from the base list for the tag chip row
+  const tagMap = new Map<string, string>()
+  baseList.forEach(e =>
+    e.entry_tags?.forEach(({ tag }) => {
+      if (!tagMap.has(tag.name)) tagMap.set(tag.name, tag.color)
+    })
+  )
+  const allTags = Array.from(tagMap.entries()) // [name, color][]
+
+  // Apply tag filter then search filter
+  const tagFiltered = activeTag
+    ? baseList.filter(e => e.entry_tags?.some(({ tag }) => tag.name === activeTag))
+    : baseList
+
+  const q = searchQuery.trim().toLowerCase()
+  const displayed = q
+    ? tagFiltered.filter(e =>
+        e.title?.toLowerCase().includes(q) ||
+        e.booth_name?.toLowerCase().includes(q) ||
+        e.artist_name?.toLowerCase().includes(q) ||
+        e.visual_inspiration?.toLowerCase().includes(q) ||
+        e.notes?.toLowerCase().includes(q) ||
+        e.material_or_phrase?.toLowerCase().includes(q) ||
+        e.entry_tags?.some(({ tag }) => tag.name.toLowerCase().includes(q))
+      )
+    : tagFiltered
 
   const allSelected     = displayed.length > 0 && selectedIds.size === displayed.length
   const selectedCount   = selectedIds.size
@@ -209,7 +246,7 @@ export default function EventDetail() {
       {!selectMode && (entries.length > 0 || archivedCount > 0) && (
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={() => setFilter('all')}
+            onClick={() => switchFilter('all')}
             className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${
               filter === 'all' ? 'bg-gradient-cta text-on-primary shadow-neon-cyan' : 'bg-surface-container text-on-surface-variant hover:text-primary'
             }`}
@@ -217,7 +254,7 @@ export default function EventDetail() {
             All {entries.length}
           </button>
           <button
-            onClick={() => setFilter('favorites')}
+            onClick={() => switchFilter('favorites')}
             className={`flex items-center gap-1 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${
               filter === 'favorites' ? 'bg-gradient-cta text-on-primary shadow-neon-cyan' : 'bg-surface-container text-on-surface-variant hover:text-primary'
             }`}
@@ -226,7 +263,7 @@ export default function EventDetail() {
             {favoriteCount > 0 ? favoriteCount : 'Favorites'}
           </button>
           <button
-            onClick={() => setFilter('archived')}
+            onClick={() => switchFilter('archived')}
             className={`flex items-center gap-1 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${
               filter === 'archived' ? 'bg-surface-container-highest text-on-surface' : 'bg-surface-container text-on-surface-variant hover:text-primary'
             }`}
@@ -234,6 +271,51 @@ export default function EventDetail() {
             <span className="material-symbols-outlined text-sm">inventory_2</span>
             {archivedCount > 0 ? archivedCount : 'Archived'}
           </button>
+        </div>
+      )}
+
+      {/* ── Search bar ─────────────────────────────────────── */}
+      {!selectMode && baseList.length > 0 && (
+        <div className="flex items-center gap-2 bg-surface-container rounded-xl px-4 py-2.5 focus-within:ring-1 focus-within:ring-primary/40 transition-all">
+          <span className="material-symbols-outlined text-on-surface-variant text-lg">search</span>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search entries…"
+            className="flex-1 bg-transparent text-sm text-on-surface placeholder:text-on-surface-variant/40 outline-none"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="text-on-surface-variant hover:text-primary transition-colors">
+              <span className="material-symbols-outlined text-lg">close</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Tag chips ──────────────────────────────────────── */}
+      {!selectMode && allTags.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          {allTags.map(([name, color]) => {
+            const isActive = activeTag === name
+            const colorClass =
+              color === 'cyan'   ? 'bg-cyan-500/20 text-cyan-300 ring-cyan-500/40' :
+              color === 'purple' ? 'bg-purple-500/20 text-purple-300 ring-purple-500/40' :
+                                   'bg-pink-500/20 text-pink-300 ring-pink-500/40'
+            return (
+              <button
+                key={name}
+                onClick={() => setActiveTag(activeTag === name ? null : name)}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
+                  isActive
+                    ? `${colorClass} ring-1`
+                    : 'bg-surface-container text-on-surface-variant hover:text-primary'
+                }`}
+              >
+                #{name}
+              </button>
+            )
+          })}
         </div>
       )}
 
@@ -251,20 +333,28 @@ export default function EventDetail() {
       {displayed.length === 0 ? (
         <div className="rounded-xl bg-surface-container p-10 flex flex-col items-center text-center gap-4">
           <span className="material-symbols-outlined text-on-surface-variant text-5xl">
-            {filter === 'favorites' ? 'favorite' : filter === 'archived' ? 'inventory_2' : 'add_a_photo'}
+            {q || activeTag ? 'search_off' : filter === 'favorites' ? 'favorite' : filter === 'archived' ? 'inventory_2' : 'add_a_photo'}
           </span>
           <div>
             <p className="font-headline font-bold text-on-surface">
-              {filter === 'favorites' ? 'No favorites yet' : filter === 'archived' ? 'Nothing archived' : 'No captures yet'}
+              {q || activeTag ? 'No matches found'
+                : filter === 'favorites' ? 'No favorites yet'
+                : filter === 'archived'  ? 'Nothing archived'
+                : 'No captures yet'}
             </p>
             <p className="text-on-surface-variant text-sm mt-1">
-              {filter === 'favorites' ? 'Tap the heart on any entry to favorite it'
-                : filter === 'archived' ? 'Archived entries will appear here'
+              {q || activeTag ? 'Try a different search term or tag'
+                : filter === 'favorites' ? 'Tap the heart on any entry to favorite it'
+                : filter === 'archived'  ? 'Archived entries will appear here'
                 : 'Tap New Capture to start capturing inspiration'}
             </p>
           </div>
-          {filter !== 'all' && (
-            <button onClick={() => setFilter('all')} className="text-sm text-primary font-bold">View all entries</button>
+          {(q || activeTag) ? (
+            <button onClick={() => { setSearchQuery(''); setActiveTag(null) }} className="text-sm text-primary font-bold">
+              Clear search
+            </button>
+          ) : filter !== 'all' && (
+            <button onClick={() => switchFilter('all')} className="text-sm text-primary font-bold">View all entries</button>
           )}
         </div>
       ) : (
