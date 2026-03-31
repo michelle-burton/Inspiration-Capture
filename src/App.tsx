@@ -9,6 +9,9 @@ import NewEntry from './pages/NewEntry'
 import Gallery from './pages/Gallery'
 import EntryDetail from './pages/EntryDetail'
 import EditEntry from './pages/EditEntry'
+import CuratePage from './pages/CuratePage'
+import CuratedSetDetail from './pages/CuratedSetDetail'
+import QuestionSets from './pages/QuestionSets'
 
 export default function App() {
   return (
@@ -23,6 +26,10 @@ export default function App() {
           <Route path="events" element={<Events />} />
           <Route path="events/:eventId" element={<EventDetail />} />
 
+          {/* Curate pages — own full-screen layout */}
+          <Route path="events/:eventId/curate" element={<CuratePage />} />
+          <Route path="events/:eventId/curated-sets/:setId" element={<CuratedSetDetail />} />
+
           {/* AppShell pages — bottom nav visible */}
           <Route element={<AppShell />}>
             <Route index element={<Home />} />
@@ -30,6 +37,7 @@ export default function App() {
             <Route path="events/:eventId/gallery" element={<Gallery />} />
             <Route path="entry/:id" element={<EntryDetail />} />
             <Route path="entry/:id/edit" element={<EditEntry />} />
+            <Route path="question-sets" element={<QuestionSets />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Route>

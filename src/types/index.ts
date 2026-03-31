@@ -76,6 +76,45 @@ export type NewEntry = Omit<Entry,
   'id' | 'user_id' | 'created_at' | 'updated_at' | 'entry_images' | 'entry_tags'
 >
 
+// ── Curated Set ───────────────────────────────────────────────────────────────
+
+export type CuratedSetStatus = 'draft' | 'ready' | 'archived'
+
+export type CuratedSet = {
+  id: string
+  user_id: string
+  event_id: string
+  title: string
+  description: string | null
+  status: CuratedSetStatus
+  created_at: string
+  updated_at: string
+  // Joined
+  curated_set_entries?: { entry_id: string }[]
+}
+
+export type CuratedSetWithEntries = Omit<CuratedSet, 'curated_set_entries'> & {
+  curated_set_entries: {
+    sort_order: number
+    added_at: string
+    entry: Entry
+  }[]
+}
+
+// ── Question Set ──────────────────────────────────────────────────────────────
+
+export type QuestionSet = {
+  id: string
+  user_id: string
+  title: string
+  description: string | null
+  question_1: string
+  question_2: string
+  question_3: string
+  created_at: string
+  updated_at: string
+}
+
 // ── Navigation ────────────────────────────────────────────────────────────────
 
-export type NavTab = 'home' | 'events'
+export type NavTab = 'home' | 'events' | 'question-sets'

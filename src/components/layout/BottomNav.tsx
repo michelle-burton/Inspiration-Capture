@@ -2,8 +2,9 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import type { NavTab } from '../../types'
 
 const NAV_ITEMS: { tab: NavTab; icon: string; label: string; path: string }[] = [
-  { tab: 'home',   icon: 'home',        label: 'Home',   path: '/'       },
-  { tab: 'events', icon: 'event',       label: 'Events', path: '/events' },
+  { tab: 'home',          icon: 'home',        label: 'Home',     path: '/'              },
+  { tab: 'events',        icon: 'event',       label: 'Events',   path: '/events'        },
+  { tab: 'question-sets', icon: 'quiz',        label: 'Q-Sets',   path: '/question-sets' },
 ]
 
 export function BottomNav() {
@@ -11,6 +12,7 @@ export function BottomNav() {
   const navigate = useNavigate()
 
   function getActiveTab(): NavTab {
+    if (location.pathname.startsWith('/question-sets')) return 'question-sets'
     if (location.pathname.startsWith('/events')) return 'events'
     return 'home'
   }

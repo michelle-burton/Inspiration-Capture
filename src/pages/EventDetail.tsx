@@ -5,6 +5,7 @@ import { getEntries, toggleFavorite, setArchived } from '../utils/db'
 import type { Event, Entry } from '../types'
 import { GlowButton } from '../components/ui/GlowButton'
 import { SignedImage } from '../components/ui/SignedImage'
+import { formatDate } from '../utils/format'
 
 type FilterMode = 'all' | 'favorites' | 'archived'
 
@@ -232,13 +233,22 @@ export default function EventDetail() {
 
       {/* ── Action buttons (hidden in select mode) ─────────── */}
       {!selectMode && (
-        <div className="grid grid-cols-2 gap-3">
-          <GlowButton variant="primary" onClick={() => navigate(`/events/${eventId}/capture`)} icon="add_a_photo" className="py-4">
-            New Capture
-          </GlowButton>
-          <GlowButton variant="secondary" onClick={() => navigate(`/events/${eventId}/gallery`)} icon="photo_library" className="py-4">
-            Gallery
-          </GlowButton>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <GlowButton variant="primary" onClick={() => navigate(`/events/${eventId}/capture`)} icon="add_a_photo" className="py-4">
+              New Capture
+            </GlowButton>
+            <GlowButton variant="secondary" onClick={() => navigate(`/events/${eventId}/gallery`)} icon="photo_library" className="py-4">
+              Gallery
+            </GlowButton>
+          </div>
+          <button
+            onClick={() => navigate(`/events/${eventId}/curate`)}
+            className="w-full py-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-secondary text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+          >
+            <span className="material-symbols-outlined text-lg">collections_bookmark</span>
+            Curate &amp; Analyze
+          </button>
         </div>
       )}
 
@@ -400,12 +410,12 @@ export default function EventDetail() {
                           {isSelected && <span className="material-symbols-outlined text-on-primary text-sm material-symbols-filled">check</span>}
                         </div>
                         <p className="font-headline font-bold text-on-surface">
-                          {entry.title || entry.booth_name || entry.artist_name || 'Untitled'}
+                          {entry.title || entry.booth_name || entry.artist_name || formatDate(entry.created_at)}
                         </p>
                       </div>
                     ) : (
                       <p className="font-headline font-bold text-on-surface flex-1">
-                        {entry.title || entry.booth_name || entry.artist_name || 'Untitled'}
+                        {entry.title || entry.booth_name || entry.artist_name || formatDate(entry.created_at)}
                       </p>
                     )}
 

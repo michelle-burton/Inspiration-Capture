@@ -88,7 +88,7 @@ export default function EntryDetail() {
       {/* Title + meta */}
       <div className="space-y-1">
         <h2 className="font-headline font-bold text-2xl text-on-surface leading-tight">
-          {entry.title || entry.booth_name || entry.artist_name || 'Untitled'}
+          {entry.title || entry.booth_name || entry.artist_name || formatDate(entry.created_at)}
         </h2>
         <div className="flex items-center gap-2 text-on-surface-variant text-xs flex-wrap">
           {entry.booth_name && <span>{entry.booth_name}</span>}
