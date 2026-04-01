@@ -12,6 +12,7 @@ import EditEntry from './pages/EditEntry'
 import CuratePage from './pages/CuratePage'
 import CuratedSetDetail from './pages/CuratedSetDetail'
 import QuestionSets from './pages/QuestionSets'
+import AnalysisRunPage from './pages/AnalysisRunPage'
 
 export default function App() {
   return (
@@ -26,9 +27,10 @@ export default function App() {
           <Route path="events" element={<Events />} />
           <Route path="events/:eventId" element={<EventDetail />} />
 
-          {/* Curate pages — own full-screen layout */}
+          {/* Curate + Analysis pages — own full-screen layout */}
           <Route path="events/:eventId/curate" element={<CuratePage />} />
           <Route path="events/:eventId/curated-sets/:setId" element={<CuratedSetDetail />} />
+          <Route path="analysis-runs/:runId" element={<AnalysisRunPage />} />
 
           {/* AppShell pages — bottom nav visible */}
           <Route element={<AppShell />}>

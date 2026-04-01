@@ -9,6 +9,8 @@ import {
 import { SignedImage } from '../components/ui/SignedImage'
 import { GlowButton } from '../components/ui/GlowButton'
 import { formatDate } from '../utils/format'
+import { AnalysisSetupModal } from '../components/analysis/AnalysisSetupModal'
+import { AnalysisRunHistory } from '../components/analysis/AnalysisRunHistory'
 import type { CuratedSetWithEntries, CuratedSetStatus, Tag } from '../types'
 
 const STATUS_OPTIONS: { value: CuratedSetStatus; label: string; style: string }[] = [
@@ -30,6 +32,7 @@ export default function CuratedSetDetail() {
   const [confirmDelete,  setConfirmDelete]  = useState(false)
   const [deleting,       setDeleting]       = useState(false)
   const [removingId,     setRemovingId]     = useState<string | null>(null)
+  const [showAnalysis,   setShowAnalysis]   = useState(false)
 
   useEffect(() => {
     if (!setId) return
@@ -270,38 +273,28 @@ export default function CuratedSetDetail() {
         )}
       </section>
 
-      {/* ── Question Sets / Analysis ─────────────────────── */}
+      {/* ── Analysis ─────────────────────────────────────── */}
       <section className="space-y-3">
         <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Analysis</p>
-        <div className="rounded-xl bg-surface-container p-4 space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-secondary/10 flex items-center justify-center flex-shrink-0">
-              <span className="material-symbols-outlined text-secondary text-lg">quiz</span>
-            </div>
-            <div className="flex-1">
-              <p className="font-headline font-bold text-sm text-on-surface">Question Sets</p>
-              <p className="text-xs text-on-surface-variant mt-0.5">
-                Create reusable question sets to guide AI analysis of this curated collection.
-              </p>
-            </div>
-          </div>
-          <GlowButton
-            variant="secondary"
-            onClick={() => navigate('/question-sets')}
-            icon="quiz"
-            className="w-full py-3"
-          >
-            Manage Question Sets
-          </GlowButton>
-          <button
-            disabled
-            className="w-full py-3 rounded-xl bg-surface-container-high text-xs font-bold text-on-surface-variant/40 uppercase tracking-widest flex items-center justify-center gap-2 cursor-not-allowed"
-          >
-            <span className="material-symbols-outlined text-sm">psychology</span>
-            Run Analysis — Coming in Phase 4
-          </button>
-        </div>
+        <GlowButton
+          variant="primary"
+          onClick={() => setShowAnalysis(true)}
+          icon="psychology"
+          className="w-full py-4"
+        >
+          Run Analysis
+        </GlowButton>
+        <button
+          onClick={() => navigate('/question-sets')}
+          className="w-full py-2.5 rounded-xl bg-surface-container hover:bg-surface-container-high text-xs font-bold text-on-surface-variant hover:text-primary flex items-center justify-center gap-2 transition-all"
+        >
+          <span className="material-symbols-outlined text-sm">quiz</span>
+          Manage Question Sets
+        </button>
       </section>
+
+      {/* ── Analysis Run History ──────────────────────────── */}
+      {set && <AnalysisRunHistory curatedSetId={set.id} />}
 
       {/* ── Delete confirmation ──────────────────────────── */}
       {confirmDelete && (
@@ -333,6 +326,17 @@ export default function CuratedSetDetail() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* ── Analysis Setup Modal ─────────────────────────── */}
+      {showAnalysis && set && (
+        <AnalysisSetupModal
+          eventId={set.event_id}
+          curatedSetId={set.id}
+          curatedSetTitle={set.title}
+          entryCount={set.curated_set_entries.length}
+          onClose={() => setShowAnalysis(false)}
+        />
       )}
     </div>
   )
